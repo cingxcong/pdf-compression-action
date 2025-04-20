@@ -1,0 +1,73 @@
+# .github/workflows/compress_pdf.yml
+
+name: Compress PDF by URL
+
+on:
+  workflow_dispatch:
+    inputs:
+      pdf_url:
+        description: 'URL of the PDF to compress'
+        required: true
+        type: string
+      compression_level:
+        description: 'Compression level (screen, ebook, printer, prepress)'
+        required: true
+        default: 'ebook'
+        type: choice
+        options:
+          - screen
+          - ebook
+          - printer
+          - prepress
+      target_size_kb:
+        description: 'Desired maximum file size in KB'
+        required: true
+        default: '300'
+        type: string
+
+jobs:
+  compress_pdf:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Ghostscript
+        run: sudo apt-get install -y ghostscript
+
+      - name: Download PDF
+        run: |
+          curl -L "${{ github.event.inputs.pdf_url }}" --output input.pdf
+          echo "Downloaded input.pdf"
+          ls -lh input.pdf
+
+      - name: Compress PDF
+        run: |
+          gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/${{ github.event.inputs.compression_level }} \
+          -dNOPAUSE -dQUIET -dBATCH -sOutputFile=compressed.pdf input.pdf
+
+      - name: Check compressed file size
+        id: size_check
+        run: |
+          actual_size=$(du -k "compressed.pdf" | cut -f1)
+          echo "Compressed file size: $actual_size KB"
+          echo "actual_size=$actual_size" >> $GITHUB_ENV
+          if [ "$actual_size" -le "${{ github.event.inputs.target_size_kb }}" ]; then
+            echo "size_ok=true" >> $GITHUB_ENV
+          else
+            echo "size_ok=false" >> $GITHUB_ENV
+          fi
+
+      - name: Upload compressed PDF if size is OK
+        if: env.size_ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: compressed-pdf
+          path: compressed.pdf
+
+      - name: Report size issue if too big
+        if: env.size_ok == 'false'
+        run: |
+          echo "Compression failed to meet target size of ${{ github.event.inputs.target_size_kb }} KB."
+          echo "Final size was $actual_size KB."
